@@ -56,20 +56,17 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	// Hash the string
 	hashVal := i.genhash(val)
 	// Look up the string in the buckets
-	cursor := int(hashVal) & (len(i.entries) - 1)
+	entries := i.entries
+	cursor := int(hashVal) & (len(entries) - 1)
 	start := cursor
-	for {
-		e := i.entries[cursor]
-		if e.index == 0 {
-			// This bucket is empty - val is not found
-			break
-		}
+	for entries[cursor].index != 0 {
+		e := &entries[cursor]
 		if e.hash == hashVal && i.IndexToString(e.index-1) == val {
 			return e.index - 1
 		}
 		i.clashes++
 		cursor++
-		if cursor == len(i.entries) {
+		if cursor == len(entries) {
 			cursor = 0
 		}
 		if cursor == start {
@@ -80,7 +77,7 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	// String was not found. Add the new string
 	i.strings = append(i.strings, val)
 	index := IndexType(len(i.strings))
-	i.entries[cursor] = entry{index: index, hash: hashVal}
+	entries[cursor] = entry{index: index, hash: hashVal}
 	// Index starts at 0, but we use 0 to mean empty in the hash buckets
 	return index - 1
 }
