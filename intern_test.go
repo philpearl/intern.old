@@ -23,17 +23,34 @@ func TestSame(t *testing.T) {
 	}
 }
 
+func TestCapRound(t *testing.T) {
+	checkCap := func(cap, exp int) {
+		in := intern.New(cap, 0.7)
+		assert.Equal(t, exp, in.Cap())
+
+	}
+
+	checkCap(0, 16)
+	checkCap(1, 16)
+	checkCap(5, 16)
+	checkCap(63, 64)
+	checkCap(64, 64)
+	checkCap(65, 128)
+	checkCap(127, 128)
+	checkCap(128, 128)
+	checkCap(129, 256)
+}
+
 func TestDifferent(t *testing.T) {
-	in := intern.New(100, 0.7)
+	in := intern.New(128, 0.7)
 	assert.NotEqual(t, in.StringToIndex("hat"), in.StringToIndex("coat"))
 	assert.Equal(t, 0, in.Clashes())
 }
 
 func BenchmarkIntern(b *testing.B) {
-	const loadFactor = 0.7
 	for _, loadFactor := range []float64{0.5, 0.6, 0.7, 0.8} {
 		b.Run(fmt.Sprintf("loadfactor=%.2f", loadFactor), func(b *testing.B) {
-			in := intern.New(b.N, 0.7)
+			in := intern.New(b.N/2, loadFactor)
 			strings := make([]string, b.N)
 			for i := range strings {
 				strings[i] = uuid.New()

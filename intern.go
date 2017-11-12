@@ -1,39 +1,50 @@
 package intern
 
 import (
+	"hash"
+	"math/bits"
 	"unsafe"
+
+	"github.com/spaolacci/murmur3"
 )
 
 type IndexType int32
 
-type bucket struct {
+type entry struct {
+	// We keep the hash alongside each entry to make it much faster to resize
+	hash uint32
+	// Index is the index of the string in the strings table
 	index IndexType
 }
 
 type Intern struct {
 	clashes int
-	buckets []bucket
+	entries []entry
 
 	// Strings we want hash. In the end this will be external, but we'll need some kind of lookup function
 	strings    []string
 	loadFactor float64
+	hash       hash.Hash32
 }
 
 func New(cap int, loadFactor float64) *Intern {
-	if cap == 0 {
-		cap = 10
+	if cap < 16 {
+		cap = 16
+	} else {
+		cap = 1 << uint(64-bits.LeadingZeros(uint(cap-1)))
 	}
 	return &Intern{
-		buckets:    make([]bucket, cap),
+		entries:    make([]entry, cap),
 		strings:    make([]string, 0, cap),
 		loadFactor: loadFactor,
+		hash:       murmur3.New32(),
 	}
 }
 
 func (i *Intern) Clashes() int { return i.clashes }
 
 // Cap returns the number of strings that could be stored in the intern table
-func (i *Intern) Cap() int { return len(i.buckets) }
+func (i *Intern) Cap() int { return len(i.entries) }
 
 // Len returns the number of strings stored in the intern table
 func (i *Intern) Len() int { return len(i.strings) }
@@ -45,20 +56,20 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	// Hash the string
 	hashVal := i.genhash(val)
 	// Look up the string in the buckets
-	cursor := hashVal % len(i.buckets)
+	cursor := int(hashVal) & (len(i.entries) - 1)
 	start := cursor
 	for {
-		index := i.buckets[cursor].index
-		if index == 0 {
+		e := i.entries[cursor]
+		if e.index == 0 {
 			// This bucket is empty - val is not found
 			break
 		}
-		if i.IndexToString(index-1) == val {
-			return index - 1
+		if e.hash == hashVal && i.IndexToString(e.index-1) == val {
+			return e.index - 1
 		}
 		i.clashes++
 		cursor++
-		if cursor == len(i.buckets) {
+		if cursor == len(i.entries) {
 			cursor = 0
 		}
 		if cursor == start {
@@ -69,7 +80,7 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	// String was not found. Add the new string
 	i.strings = append(i.strings, val)
 	index := IndexType(len(i.strings))
-	i.buckets[cursor].index = index
+	i.entries[cursor] = entry{index: index, hash: hashVal}
 	// Index starts at 0, but we use 0 to mean empty in the hash buckets
 	return index - 1
 }
@@ -79,52 +90,33 @@ func (i *Intern) IndexToString(index IndexType) string {
 	return i.strings[index]
 }
 
-func (i *Intern) genhash(val string) int {
-	var hash fnvHash = offset32
-	hash.Write(*(*[]byte)(unsafe.Pointer(&val)))
-	return int(hash)
+func (i *Intern) genhash(val string) uint32 {
+	i.hash.Reset()
+	i.hash.Write(*(*[]byte)(unsafe.Pointer(&val)))
+	return i.hash.Sum32()
 }
 
 func (i *Intern) resize() {
-	if len(i.strings) < int(i.loadFactor*float64(len(i.buckets))) {
+	if len(i.strings) < int(i.loadFactor*float64(len(i.entries))) {
 		return
 	}
 
 	// Make a new set of buckets twice as large as the current set
-	oldBuckets := i.buckets
-	numBuckets := 2 * len(oldBuckets)
-	i.buckets = make([]bucket, numBuckets)
+	oldEntries := i.entries
+	numEntries := 2 * len(oldEntries)
+	i.entries = make([]entry, numEntries)
 
-	for _, b := range oldBuckets {
-		if b.index == 0 {
+	for _, e := range oldEntries {
+		if e.index == 0 {
 			continue
 		}
-		val := i.strings[b.index-1]
-		hashVal := i.genhash(val)
-		cursor := hashVal % numBuckets
-		for i.buckets[cursor].index != 0 {
+		cursor := int(e.hash) & (numEntries - 1)
+		for i.entries[cursor].index != 0 {
 			cursor++
-			if cursor == numBuckets {
+			if cursor == numEntries {
 				cursor = 0
 			}
 		}
-		i.buckets[cursor].index = b.index
+		i.entries[cursor] = e
 	}
-}
-
-// Taken from the hash/fnv package to speed it up a little
-type fnvHash uint32
-
-const (
-	offset32 = 2166136261
-	prime32  = 16777619
-)
-
-func (s *fnvHash) Write(data []byte) {
-	hash := *s
-	for _, c := range data {
-		hash ^= fnvHash(c)
-		hash *= prime32
-	}
-	*s = hash
 }
