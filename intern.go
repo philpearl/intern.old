@@ -8,15 +8,23 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
+// IndexType is the type for the index we convert strings to. We use 32bits as surely no-one will have
+// more than 4 billion strings?
 type IndexType int32
 
+// entry is an entry in our hash table. It stores the hash of the string that corresponds to this entry,
+// and the index of the string in the string table. We actually store index+1 so we can use zero to
+// indicate an empty entry
 type entry struct {
 	// We keep the hash alongside each entry to make it much faster to resize
+	// It also speeds up stepping through entries when hashes clash
 	hash uint32
 	// Index is the index of the string in the strings table
 	index IndexType
 }
 
+// Intern is a string-interning implementation. It converts strings to integers and vice-versa. The
+// integer indexes start at 1 and increase by 1 for each new string.
 type Intern struct {
 	clashes int
 	entries []entry
@@ -44,13 +52,14 @@ func New(cap int, loadFactor float64) *Intern {
 	}
 }
 
+// Clashes returns the number of hash collisions we encounter adding strings.
 func (i *Intern) Clashes() int { return i.clashes }
 
 // Cap returns the number of strings that could be stored in the intern table
 func (i *Intern) Cap() int { return len(i.entries) }
 
 // Len returns the number of strings stored in the intern table
-func (i *Intern) Len() int { return len(i.strings) }
+func (i *Intern) Len() int { return i.count }
 
 // StringToIndex converts a string to an integer. The same string will always result in the same
 // integer value. Values start at 0 and increment by one for each new unique string
