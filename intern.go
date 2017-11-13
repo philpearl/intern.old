@@ -22,7 +22,8 @@ type Intern struct {
 	entries []entry
 
 	// Strings we want hash. In the end this will be external, but we'll need some kind of lookup function
-	strings    []string
+	strings    []*[1024]string
+	count      int
 	loadFactor float64
 	hash       hash.Hash32
 }
@@ -35,7 +36,7 @@ func New(cap int, loadFactor float64) *Intern {
 	}
 	return &Intern{
 		entries:    make([]entry, cap),
-		strings:    make([]string, 0, cap),
+		strings:    make([]*[1024]string, 0),
 		loadFactor: loadFactor,
 		hash:       murmur3.New32(),
 	}
@@ -75,16 +76,22 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	}
 
 	// String was not found. Add the new string
-	i.strings = append(i.strings, val)
-	index := IndexType(len(i.strings))
-	entries[cursor] = entry{index: index, hash: hashVal}
+	index := IndexType(i.count)
+	i.count++
+	j, k := index/1024, index&1023
+	if k == 0 {
+		i.strings = append(i.strings, new([1024]string))
+	}
+	i.strings[j][k] = val
+
 	// Index starts at 0, but we use 0 to mean empty in the hash buckets
-	return index - 1
+	entries[cursor] = entry{index: index + 1, hash: hashVal}
+	return index
 }
 
 // IndexToString returns the string corresponding to the requested index.
 func (i *Intern) IndexToString(index IndexType) string {
-	return i.strings[index]
+	return i.strings[index/1024][index&1023]
 }
 
 func (i *Intern) genhash(val string) uint32 {
@@ -94,7 +101,7 @@ func (i *Intern) genhash(val string) uint32 {
 }
 
 func (i *Intern) resize() {
-	if len(i.strings) < int(i.loadFactor*float64(len(i.entries))) {
+	if i.count < int(i.loadFactor*float64(len(i.entries))) {
 		return
 	}
 
