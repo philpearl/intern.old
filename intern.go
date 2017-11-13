@@ -24,6 +24,7 @@ type Intern struct {
 	// Strings we want hash. In the end this will be external, but we'll need some kind of lookup function
 	strings    []*[1024]string
 	count      int
+	threshold  int
 	loadFactor float64
 	hash       hash.Hash32
 }
@@ -38,6 +39,7 @@ func New(cap int, loadFactor float64) *Intern {
 		entries:    make([]entry, cap),
 		strings:    make([]*[1024]string, 0),
 		loadFactor: loadFactor,
+		threshold:  int(loadFactor * float64(cap)),
 		hash:       murmur3.New32(),
 	}
 }
@@ -101,13 +103,14 @@ func (i *Intern) genhash(val string) uint32 {
 }
 
 func (i *Intern) resize() {
-	if i.count < int(i.loadFactor*float64(len(i.entries))) {
+	if i.count < i.threshold {
 		return
 	}
 
 	// Make a new set of buckets twice as large as the current set
 	oldEntries := i.entries
 	numEntries := 2 * len(oldEntries)
+	i.threshold = int(float64(numEntries) * i.loadFactor)
 	i.entries = make([]entry, numEntries)
 
 	for _, e := range oldEntries {
