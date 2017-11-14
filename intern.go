@@ -1,3 +1,16 @@
+/*
+Package intern implements a string interner. This converts strings to integer indices, and also
+converts the indices back to strings. The indices start at zero and increase by 1 for each new
+unique string.
+
+This can be used to reduce string duplication, and can also help by converting string keys into
+more convenient integer IDs that are faster to compare. This can be particularly helpful when
+using graph algorithms.
+
+Intern is intended to be faster and perhaps more memory efficient than the obvious implementation
+using a map[string]int32 and a []string. At the moment it is 'more than twice as quick' and uses
+less than a 3rd of the RAM when saving UUIDs.
+*/
 package intern
 
 import (
@@ -23,8 +36,8 @@ type entry struct {
 	index IndexType
 }
 
-// Intern is a string-interning implementation. It converts strings to integers and vice-versa. The
-// integer indexes start at 1 and increase by 1 for each new string.
+// Intern is a string-interner. It converts strings to integers and vice-versa. The
+// integer indexes start at 0 and increase by 1 for each new string.
 type Intern struct {
 	clashes int
 	entries []entry

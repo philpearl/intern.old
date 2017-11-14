@@ -9,14 +9,14 @@ Another use is to swap string keys for integer indices. This can be very useful 
 The indices start at 0 and increment by 1 for each new string, so can be used as indices into a slice of entries corresponding to each key.
 
 ```go
-	import "github.com/philpearl/intern"
+import "github.com/philpearl/intern"
 
-	func DoSomething() {
-		in := intern.New(1000, 0.7) // 0.7 seems to be a good load factor
+func DoSomething() {
+	in := intern.New(1000, 0.7) // 0.7 seems to be a good load factor
 
-		alice := in.StringToIndex("Alice")
-		bob := in.StringToIndex("Bob")
+	alice := in.StringToIndex("Alice")
+	bob := in.StringToIndex("Bob")
 
-		fmt.Printf("Alice's name is %s, Bob's is %s", in.IndexToString(alice), in.IndexToString(bob))
-	}
+	fmt.Printf("Alice's name is %s, Bob's is %s", in.IndexToString(alice), in.IndexToString(bob))
+}
 ```
