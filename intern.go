@@ -193,6 +193,9 @@ func (i *Intern) doCoalesce(entries [][]entry) {
 	newEntries := make([]entry, l)
 	for _, old := range entries {
 		for _, olde := range old {
+			if olde.index == 0 {
+				continue
+			}
 			cursor := int(olde.hash) % l
 			for newEntries[cursor].index != 0 {
 				cursor++
