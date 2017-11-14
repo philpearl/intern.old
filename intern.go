@@ -69,7 +69,8 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	hashVal := i.genhash(val)
 	// Look up the string in the buckets
 	entries := i.entries
-	cursor := int(hashVal) & (len(entries) - 1)
+	l := len(entries)
+	cursor := int(hashVal) & (l - 1)
 	start := cursor
 	for entries[cursor].index != 0 {
 		e := &entries[cursor]
@@ -78,7 +79,7 @@ func (i *Intern) StringToIndex(val string) IndexType {
 		}
 		i.clashes++
 		cursor++
-		if cursor == len(entries) {
+		if cursor == l {
 			cursor = 0
 		}
 		if cursor == start {
@@ -121,12 +122,13 @@ func (i *Intern) resize() {
 	numEntries := 2 * len(oldEntries)
 	i.threshold = int(float64(numEntries) * i.loadFactor)
 	i.entries = make([]entry, numEntries)
+	mask := numEntries - 1
 
 	for _, e := range oldEntries {
 		if e.index == 0 {
 			continue
 		}
-		cursor := int(e.hash) & (numEntries - 1)
+		cursor := int(e.hash) & mask
 		for i.entries[cursor].index != 0 {
 			cursor++
 			if cursor == numEntries {
