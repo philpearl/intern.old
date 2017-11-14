@@ -3,6 +3,7 @@ package intern
 import (
 	"hash"
 	"math/bits"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/spaolacci/murmur3"
@@ -35,6 +36,10 @@ type Intern struct {
 	threshold  int
 	loadFactor float64
 	hash       hash.Hash32
+
+	coalescing bool
+	done       int32
+	newEntries []entry
 }
 
 func New(cap int, loadFactor float64) *Intern {
@@ -108,7 +113,8 @@ func (i *Intern) StringToIndex(val string) IndexType {
 }
 
 func (i *Intern) findSlot(entries []entry, hashVal uint32, val string) (IndexType, int) {
-	cursor := int(hashVal) & (len(entries) - 1)
+	l := len(entries)
+	cursor := int(hashVal) % l
 	start := cursor
 	for entries[cursor].index != 0 {
 		e := &entries[cursor]
@@ -117,7 +123,7 @@ func (i *Intern) findSlot(entries []entry, hashVal uint32, val string) (IndexTyp
 		}
 		i.clashes++
 		cursor++
-		if cursor == len(entries) {
+		if cursor == l {
 			cursor = 0
 		}
 		if cursor == start {
@@ -140,6 +146,9 @@ func (i *Intern) genhash(val string) uint32 {
 }
 
 func (i *Intern) resize() {
+	if i.coalescing {
+		i.checkCoalescingComplete()
+	}
 	if i.count < i.threshold {
 		return
 	}
@@ -148,4 +157,52 @@ func (i *Intern) resize() {
 	numEntries := 2 * len(i.entries[len(i.entries)-1])
 	i.entries = append(i.entries, make([]entry, numEntries))
 	i.threshold = i.count + int(float64(numEntries)*i.loadFactor)
+	i.coalesce()
+}
+
+func (i *Intern) coalesce() {
+	// Here we're going to try coalescing two smaller tables which are no
+	// longer changing in the background.
+	// This appears to be better than not coalescing. Should be even better
+	// outside a benchmark where there's more time for the background processing
+	// to run
+	if !i.coalescing && len(i.entries) > 2 {
+		i.coalescing = true
+		go i.doCoalesce(i.entries[0 : len(i.entries)-1])
+	}
+}
+
+func (i *Intern) checkCoalescingComplete() {
+	// Is the coalescing done?
+	// Can we do this with the newEntries? Or do we have to do an atomic operation
+	// here too?
+	if atomic.CompareAndSwapInt32(&i.done, 1, 0) {
+		i.coalescing = false
+		i.entries = append([][]entry{i.newEntries}, i.entries[2:]...)
+	}
+}
+
+func (i *Intern) doCoalesce(entries [][]entry) {
+	// a is size 2^x
+	// b is size 2^(x+1)
+	// Power of 2 would be nice but never mind
+	l := 0
+	for _, entry := range entries {
+		l += len(entry)
+	}
+	newEntries := make([]entry, l)
+	for _, old := range entries {
+		for _, olde := range old {
+			cursor := int(olde.hash) % l
+			for newEntries[cursor].index != 0 {
+				cursor++
+				if cursor == l {
+					cursor = 0
+				}
+			}
+			newEntries[cursor] = olde
+		}
+	}
+	i.newEntries = newEntries
+	atomic.StoreInt32(&i.done, 1)
 }
