@@ -27,7 +27,7 @@ type entry struct {
 // integer indexes start at 1 and increase by 1 for each new string.
 type Intern struct {
 	clashes int
-	entries []entry
+	entries [][]entry
 
 	// Strings we want hash. In the end this will be external, but we'll need some kind of lookup function
 	strings    []*[1024]string
@@ -43,8 +43,11 @@ func New(cap int, loadFactor float64) *Intern {
 	} else {
 		cap = 1 << uint(64-bits.LeadingZeros(uint(cap-1)))
 	}
+
+	entries := make([]entry, cap)
+
 	return &Intern{
-		entries:    make([]entry, cap),
+		entries:    [][]entry{entries},
 		strings:    make([]*[1024]string, 0),
 		loadFactor: loadFactor,
 		threshold:  int(loadFactor * float64(cap)),
@@ -56,7 +59,13 @@ func New(cap int, loadFactor float64) *Intern {
 func (i *Intern) Clashes() int { return i.clashes }
 
 // Cap returns the number of strings that could be stored in the intern table
-func (i *Intern) Cap() int { return len(i.entries) }
+func (i *Intern) Cap() int {
+	cap := 0
+	for _, entries := range i.entries {
+		cap += len(entries)
+	}
+	return cap
+}
 
 // Len returns the number of strings stored in the intern table
 func (i *Intern) Len() int { return i.count }
@@ -68,13 +77,43 @@ func (i *Intern) StringToIndex(val string) IndexType {
 	// Hash the string
 	hashVal := i.genhash(val)
 	// Look up the string in the buckets
-	entries := i.entries
+	// When the tables fill, we just add an additional table on the end.
+	// So we look for our entry in all the old tables before using whatever
+	// spot we find in the newest table. This is an attempt to avoid resizing
+	// the table.
+	// Turns out it's reasonably efficient for allocations, but it is slower
+	// than just replacing the table with a bigger one to grow.
+	var index IndexType
+	var cursor int
+	var entries []entry
+	for _, entries = range i.entries {
+		index, cursor = i.findSlot(entries, hashVal, val)
+		if index != 0 {
+			return index - 1
+		}
+	}
+
+	// String was not found. Add the new string
+	index = IndexType(i.count)
+	i.count++
+	j, k := index/1024, index&1023
+	if k == 0 {
+		i.strings = append(i.strings, new([1024]string))
+	}
+	i.strings[j][k] = val
+
+	// Index starts at 0, but we use 0 to mean empty in the hash buckets
+	entries[cursor] = entry{index: index + 1, hash: hashVal}
+	return index
+}
+
+func (i *Intern) findSlot(entries []entry, hashVal uint32, val string) (IndexType, int) {
 	cursor := int(hashVal) & (len(entries) - 1)
 	start := cursor
 	for entries[cursor].index != 0 {
 		e := &entries[cursor]
 		if e.hash == hashVal && i.IndexToString(e.index-1) == val {
-			return e.index - 1
+			return e.index, 0
 		}
 		i.clashes++
 		cursor++
@@ -86,18 +125,7 @@ func (i *Intern) StringToIndex(val string) IndexType {
 		}
 	}
 
-	// String was not found. Add the new string
-	index := IndexType(i.count)
-	i.count++
-	j, k := index/1024, index&1023
-	if k == 0 {
-		i.strings = append(i.strings, new([1024]string))
-	}
-	i.strings[j][k] = val
-
-	// Index starts at 0, but we use 0 to mean empty in the hash buckets
-	entries[cursor] = entry{index: index + 1, hash: hashVal}
-	return index
+	return 0, cursor
 }
 
 // IndexToString returns the string corresponding to the requested index.
@@ -117,22 +145,7 @@ func (i *Intern) resize() {
 	}
 
 	// Make a new set of buckets twice as large as the current set
-	oldEntries := i.entries
-	numEntries := 2 * len(oldEntries)
-	i.threshold = int(float64(numEntries) * i.loadFactor)
-	i.entries = make([]entry, numEntries)
-
-	for _, e := range oldEntries {
-		if e.index == 0 {
-			continue
-		}
-		cursor := int(e.hash) & (numEntries - 1)
-		for i.entries[cursor].index != 0 {
-			cursor++
-			if cursor == numEntries {
-				cursor = 0
-			}
-		}
-		i.entries[cursor] = e
-	}
+	numEntries := 2 * len(i.entries[len(i.entries)-1])
+	i.entries = append(i.entries, make([]entry, numEntries))
+	i.threshold = i.count + int(float64(numEntries)*i.loadFactor)
 }
